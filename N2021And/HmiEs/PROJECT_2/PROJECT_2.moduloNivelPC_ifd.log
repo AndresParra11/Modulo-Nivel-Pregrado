@@ -1,0 +1,9 @@
+﻿ES2RT linker log file created on martes, 13 de junio de 2023 7:22:58
+
+Linking...
+User Info - Resource Id [ NumberPowerTags ], caused in [ LinkerLicense ]
+User Info - Resource Id [ RequiredLicense ], caused in [ LinkerLicense ]
+0 errors, 0 warnings - succeeded.
+
+Writing "C:\Archivos de programa\Siemens\Step7\s7proj\N2021And\HmiEs\PROJECT_2\PROJECT_2.moduloNivelPC"...
+Done.
