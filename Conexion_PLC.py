@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 
 # Importación de librerías
-import tensorflow as tf
-import asyncio
-import logging
-import h5py
-from asyncua import Client
-from sklearn.preprocessing import MinMaxScaler
+import pandas as pd
 import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+from asyncua import Client, ua
+import h5py
+import logging
+import asyncio
+import tensorflow as tf
 
 
 # Definir la función de pérdida personalizada
@@ -37,21 +38,13 @@ with h5py.File(ruta_modelo, 'r') as file:
 
 # Crea una función para procesar las variables de entrada y obtener las variables de salida predichas
 def process_variables(variables_input):
-    # Crear una instancia de MinMaxScaler
-    scaler = MinMaxScaler()
-
-    # Normalizar las variables de entrada
-    variables_input_normalized = scaler.fit_transform(variables_input)
 
     # Transformar los datos en tensores
     variables_input_tensor = tf.convert_to_tensor(
-        variables_input_normalized, dtype=tf.float32)
+        variables_input, dtype=tf.float32)
 
     # Obtener las variables de salida predichas
-    variables_output_pred = model_cargado.predict(variables_input_tensor)
-
-    # Desnormalizar las variables de salida predichas
-    variables_output = scaler.inverse_transform(variables_output_pred)
+    variables_output = model_cargado.predict(variables_input_tensor)
 
     return variables_output
 
@@ -60,6 +53,9 @@ def process_variables(variables_input):
 async def main():
     # Crear una instancia del cliente OPC UA
     client = Client(url=url)
+
+    # Crear una instancia de MinMaxScaler
+    scaler = MinMaxScaler(feature_range=(0, 1))
 
     try:
         # Intentar establecer la conexión al servidor OPC UA
@@ -70,29 +66,65 @@ async def main():
         return
 
 # ------------------------------ Cliente -------------------------------------#
+    # Buffer FIFO Sliding Window para almacenar las variables de entrada
+    sequence_length = 10
+    buffer = []
 
-    # Variables de Entrada al modelo entregadas por el PLC
-    nivel_sp = await client.get_node("ns=2;s=Nivel.PLC Nivel.SP Nivel").get_value()
-    nivel_pv = await client.get_node("ns=2;s=Nivel.PLC Nivel.Nivel").get_value()
-    presion_sp = await client.get_node(
-        "ns=2;s=Nivel.PLC Nivel.SP Presión").get_value()
-    presion_pv = await client.get_node("ns=2;s=Nivel.PLC Nivel.Presión").get_value()
-    frec_bomba = await client.get_node(
-        "ns=2;s=Nivel.PLC Nivel.Frec Bomba").get_value()
+    while True:
+        # Variables de entrada entregadas por el PLC
+        nivel_sp = await client.get_node("ns=2;s=Nivel.PLC Nivel.SP Nivel").get_value()
+        nivel_pv = await client.get_node("ns=2;s=Nivel.PLC Nivel.Nivel").get_value()
+        presion_sp = await client.get_node("ns=2;s=Nivel.PLC Nivel.SP Presión").get_value()
+        presion_pv = await client.get_node("ns=2;s=Nivel.PLC Nivel.Presión").get_value()
+        frec_bomba = await client.get_node("ns=2;s=Nivel.PLC Nivel.Frec Bomba").get_value()
 
-    variables_input = np.array(
-        [[nivel_pv, nivel_sp, presion_pv, presion_sp, frec_bomba]])
-    print(variables_input)
+        # Variables de entrada
+        variables_input = [nivel_pv, nivel_sp,
+                           presion_pv, presion_sp, frec_bomba]
 
-    # Buffer FIFO Sliding Window buffer para almacenar las variables de entrada
-    # While infinito para capturar las variables de entrada
-    # Capturar el CTRL C para detener el programa
+        # Agregar variables de entrada al buffer
+        buffer.append(variables_input)
 
-    variables_output = process_variables(variables_input)
-    print(variables_output)
+        if len(buffer) == sequence_length:
+            # Definir las columnas de entrada
+            input_columns = ['hPV [cm]', 'hSP [cm]', 'PPV [mbar]',
+                             'PSP [mbar]', 'Potencia de la Bomba [hp]']
 
-    # Agregar una pausa de 2 segundos para permitir que se realicen las operaciones.
-    await asyncio.sleep(2)
+            # Crear el DataFrame
+            df = pd.DataFrame(buffer, columns=input_columns)
+
+            # Normalizar las columnas de entrada
+            df[input_columns] = scaler.fit_transform(df[input_columns])
+
+            X_input = df.to_numpy()
+            X_input = X_input.reshape(1, -1, 5)
+
+            # Obtener las variables de salida predichas y desnormalizarlas
+            variables_output = np.clip(
+                process_variables(X_input)[0]*100, 0, 100)
+
+            # Guardar las variables de salida para su posterior escritura en el PLC
+            aperture_valve_pressure = ua.DataValue(
+                ua.Variant(variables_output[0], ua.VariantType.Float))
+            aperture_valve_level = ua.DataValue(
+                ua.Variant(variables_output[1], ua.VariantType.Float))
+
+            # Obtener los nodos de las variables de salida
+            valve_nivel_PLC = client.get_node(
+                "ns=2;s=Nivel.PLC Nivel.Valvula Nivel")
+            valve_pressure_PLC = client.get_node(
+                "ns=2;s=Nivel.PLC Nivel.Valvula Presión")
+
+            # Escribir las variables de salida en el PLC
+            await valve_nivel_PLC.set_value(aperture_valve_level)
+            await valve_pressure_PLC.set_value(aperture_valve_pressure)
+
+            # Eliminar el elemento más antiguo del buffer (FIFO)
+            buffer.pop(0)
+
+        # Esperar 1 segundo antes de actualizar el buffer
+        await asyncio.sleep(1)
+
     try:
         # Intentar desconectar el cliente OPC UA
         await client.disconnect()

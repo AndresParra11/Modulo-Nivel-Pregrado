@@ -7,6 +7,7 @@ from keras.models import Sequential
 from keras.layers import LSTM, Dense
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split, TimeSeriesSplit
+import joblib
 
 # Configurar el estilo de las gráficas
 plt.style.use('fivethirtyeight')
@@ -26,7 +27,7 @@ input_columns = ['hPV [cm]', 'hSP [cm]', 'PPV [mbar]',
 output_columns = ['% Apertura Presion', '% Apertura Nivel']
 
 # Crear una instancia de MinMaxScaler
-scaler = MinMaxScaler()
+scaler = MinMaxScaler(feature_range=(0, 1))
 
 # Normalizar las columnas de entrada
 datos[input_columns] = scaler.fit_transform(datos[input_columns])
@@ -89,7 +90,7 @@ model = Sequential()
 
 # Agregar una capa LSTM
 # Disiminuir el número de neuronas para evitar el sobreajuste de 64 a 32.
-model.add(LSTM(32, input_shape=(sequence_length, len(input_columns))))
+model.add(LSTM(64, input_shape=(sequence_length, len(input_columns))))
 
 # Agregar una capa densa para la salida
 model.add(Dense(len(output_columns)))
@@ -108,7 +109,7 @@ model.summary()
 
 # Entrenar el modelo
 history = model.fit(X_train_tensor, y_train_tensor, batch_size=32,
-                    epochs=5, validation_data=(X_val_tensor, y_val_tensor))
+                    epochs=10, validation_data=(X_val_tensor, y_val_tensor))
 
 
 # Evaluar el rendimiento del modelo en el conjunto de prueba
@@ -117,6 +118,10 @@ print("Pérdida en el conjunto de prueba:", loss)
 
 # Guardar el modelo entrenado
 model.save('Modelo_Nivel_Presion.h5')
+
+# Guardar el escalador
+scaler_filename = "scaler.save"
+joblib.dump(scaler, scaler_filename)
 
 # Graficar los errores en función de las épocas
 plt.plot(history.history['loss'], label='Entrenamiento')
@@ -130,7 +135,7 @@ plt.show()
 # Obtener las predicciones del modelo en el conjunto de prueba
 y_pred = model.predict(X_test_tensor)
 
-# Desnormalizar las predicciones y los datos de prueba
+# Desnormalizar las predicciones y los datos de prueba. Limitar a valores entre 0 y 100
 y_pred = scaler.inverse_transform(y_pred)
 y_test = scaler.inverse_transform(y_test_tensor)
 
