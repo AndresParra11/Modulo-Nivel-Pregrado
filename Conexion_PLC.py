@@ -15,7 +15,6 @@ import tensorflow as tf
 def rmse_loss(y_true, y_pred):
     return tf.sqrt(tf.reduce_mean(tf.square(y_pred - y_true)))
 
-
 # Registrar la función de pérdida personalizada
 tf.keras.utils.get_custom_objects().update({'rmse_loss': rmse_loss})
 
@@ -35,7 +34,6 @@ ruta_modelo = 'Modelo_Nivel_Presion.h5'
 with h5py.File(ruta_modelo, 'r') as file:
     model_cargado = tf.keras.models.load_model(file)
 
-
 # Crea una función para procesar las variables de entrada y obtener las variables de salida predichas
 def process_variables(variables_input):
 
@@ -47,15 +45,18 @@ def process_variables(variables_input):
     variables_output = model_cargado.predict(variables_input_tensor)
 
     return variables_output
+  
+def Escalizado (datos,columna, rango_original, rango_deseado): 
+  datos[columna] = (datos[columna] - rango_original[0]) / (rango_original[1] - rango_original[0]) * (rango_deseado[1] - rango_deseado[0]) + rango_deseado[0]
+  
+  """ datos[columna] = (datos[columna] - valor_minimo) / (valor_maximo - valor_minimo) """
+  return datos[columna]
 
 
 # Definición de la función principal
 async def main():
     # Crear una instancia del cliente OPC UA
     client = Client(url=url)
-
-    # Crear una instancia de MinMaxScaler
-    scaler = MinMaxScaler(feature_range=(0, 1))
 
     try:
         # Intentar establecer la conexión al servidor OPC UA
@@ -93,8 +94,12 @@ async def main():
             # Crear el DataFrame
             df = pd.DataFrame(buffer, columns=input_columns)
 
-            # Normalizar las columnas de entrada
-            df[input_columns] = scaler.fit_transform(df[input_columns])
+            # Escalar los datos de entrada
+            df['hPV [cm]'] = Escalizado(df,'hPV [cm]',[0,60],[0,1])
+            df['hSP [cm]'] = Escalizado(df,'hSP [cm]',[0,60],[0,1])
+            df['PPV [mbar]'] = Escalizado(df,'PPV [mbar]',[0,600],[0,1])
+            df['PSP [mbar]'] = Escalizado(df,'PSP [mbar]',[0,600],[0,1])
+            df['Potencia de la Bomba [hp]'] = Escalizado(df,'Potencia de la Bomba [hp]',[0,60],[0,1])
 
             X_input = df.to_numpy()
             X_input = X_input.reshape(1, -1, 5)
@@ -102,7 +107,10 @@ async def main():
             # Obtener las variables de salida predichas y desnormalizarlas
             variables_output = np.clip(
                 process_variables(X_input)[0]*100, 0, 100)
+            
+            print(variables_output)
 
+            
             # Guardar las variables de salida para su posterior escritura en el PLC
             aperture_valve_pressure = ua.DataValue(
                 ua.Variant(variables_output[0], ua.VariantType.Float))
@@ -122,8 +130,8 @@ async def main():
             # Eliminar el elemento más antiguo del buffer (FIFO)
             buffer.pop(0)
 
-        # Esperar 1 segundo antes de actualizar el buffer
-        await asyncio.sleep(1)
+        """ # Esperar 1 segundo antes de actualizar el buffer
+        await asyncio.sleep(0.1) """
 
     try:
         # Intentar desconectar el cliente OPC UA
@@ -137,59 +145,6 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 
-
-# ----------------------- Código para revisar la supscripción ------------------------- -------------------- a los cambios de las variables de entrada del modelo ----------#
-
-""" 
-def subscribe_opc_variables():
-    # Obtener los nodos de las variables de entrada y salida
-    # Reemplaza con los NodeIds de tus variables de entrada
-    node_input1 = client.get_node("ns=2;s=Entrada1")
-    node_input2 = client.get_node("ns=2;s=Entrada2")
-    node_input3 = client.get_node("ns=2;s=Entrada3")
-    node_input4 = client.get_node("ns=2;s=Entrada4")
-    node_input5 = client.get_node("ns=2;s=Entrada5")
-
-    # Reemplaza con los NodeIds de tus variables de salida
-    node_output1 = client.get_node("ns=2;s=Salida1")
-    node_output2 = client.get_node("ns=2;s=Salida2")
-
-    # Suscribirse a los cambios de las variables de entrada
-    handle1 = node_input1.subscribe_data_change(data_change_callback)
-    handle2 = node_input2.subscribe_data_change(data_change_callback)
-    handle3 = node_input3.subscribe_data_change(data_change_callback)
-    handle4 = node_input4.subscribe_data_change(data_change_callback)
-    handle5 = node_input5.subscribe_data_change(data_change_callback)
-
-    # Función callback para procesar los datos cuando cambian las variables de entrada
-    def data_change_callback(node, data):
-        # Obtener los valores de las variables de entrada
-        variables_input1 = np.array(data.monitored_items[0].value.Value)
-        variables_input2 = np.array(data.monitored_items[1].value.Value)
-        variables_input3 = np.array(data.monitored_items[2].value.Value)
-        variables_input4 = np.array(data.monitored_items[3].value.Value)
-        variables_input5 = np.array(data.monitored_items[4].value.Value)
-
-        # Combinar las variables de entrada en una matriz
-        variables_input = np.column_stack(
-            (variables_input1, variables_input2, variables_input3, variables_input4, variables_input5))
-
-        # Procesar las variables de entrada y obtener las variables de salida predichas
-        variables_output = process_variables(variables_input)
-
-        # Separar las variables de salida
-        variables_output1 = variables_output[:, 0]
-        variables_output2 = variables_output[:, 1]
-
-        # Escribir los valores de las variables de salida en los nodos correspondientes
-        node_output1.set_value(variables_output1)
-        node_output2.set_value(variables_output2)
-
-    # Mantener la ejecución en espera para recibir las actualizaciones del OPC
-    client.run_subscriptions()
-
-
-subscribe_opc_variables() """
 
 # ----------   ----- Código para escribir en el OPC ---------------------------------#
 

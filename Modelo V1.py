@@ -26,14 +26,38 @@ input_columns = ['hPV [cm]', 'hSP [cm]', 'PPV [mbar]',
                  'PSP [mbar]', 'Potencia de la Bomba [hp]']
 output_columns = ['% Apertura Presion', '% Apertura Nivel']
 
-# Crear una instancia de MinMaxScaler
+""" # Crear una instancia de MinMaxScaler
 scaler = MinMaxScaler(feature_range=(0, 1))
 
-# Normalizar las columnas de entrada
+# Escalizar el nivel de 0 - 60 cm
+scaler.fit([[0], [60]])
+datos['hPV [cm]'] = scaler.transform(datos[['hPV [cm]']])
+print(datos['hPV [cm]']) """
+
+def Escalizado (datos,columna, rango_original, rango_deseado): 
+  datos[columna] = (datos[columna] - rango_original[0]) / (rango_original[1] - rango_original[0]) * (rango_deseado[1] - rango_deseado[0]) + rango_deseado[0]
+  
+  """ datos[columna] = (datos[columna] - valor_minimo) / (valor_maximo - valor_minimo) """
+  return datos[columna]
+
+# Escalar los datos de las variables de entrada
+datos['hPV [cm]'] = Escalizado(datos,'hPV [cm]',[0,60],[0,1])
+datos['hSP [cm]'] = Escalizado(datos,'hSP [cm]',[0,60],[0,1])
+datos['PPV [mbar]'] = Escalizado(datos,'PPV [mbar]',[0,600],[0,1])
+datos['PSP [mbar]'] = Escalizado(datos,'PSP [mbar]',[0,600],[0,1])
+datos['Potencia de la Bomba [hp]'] = Escalizado(datos,'Potencia de la Bomba [hp]',[0,60],[0,1])
+
+# Escalar los datos de las variables de salida
+datos['% Apertura Presion'] = Escalizado(datos,'% Apertura Presion',[0,100],[0,1])
+datos['% Apertura Nivel'] = Escalizado(datos,'% Apertura Nivel',[0,100],[0,1])
+
+print(datos)
+
+""" # Normalizar las columnas de entrada
 datos[input_columns] = scaler.fit_transform(datos[input_columns])
 
 # Normalizar las columnas de salida
-datos[output_columns] = scaler.fit_transform(datos[output_columns])
+datos[output_columns] = scaler.fit_transform(datos[output_columns]) """
 
 # División de conjuntos de datos con TimeSeriesSplit
 X_train_list = []
@@ -45,9 +69,13 @@ for train_index, test_index in tscv.split(datos):
     X_train_list.append(datos.iloc[train_index])
     X_val_test_list.append(datos.iloc[test_index])
 
-# Escoger el conjunto de entrenamiento. En este caso, el último.
+""" # Escoger el conjunto de entrenamiento. En este caso, el último.
 X_train = X_train_list[4]
-X_val_test = X_val_test_list[4]
+X_val_test = X_val_test_list[4] """
+
+# Unir el conjunto de entrenamiento. 
+X_train = pd.concat(X_train_list)
+X_val_test = pd.concat(X_val_test_list)
 
 # Dividir el conjunto de validación y prueba de forma equitativa y sin barajear.
 X_val, X_test = train_test_split(X_val_test, test_size=0.5, shuffle=False)
@@ -119,9 +147,9 @@ print("Pérdida en el conjunto de prueba:", loss)
 # Guardar el modelo entrenado
 model.save('Modelo_Nivel_Presion.h5')
 
-# Guardar el escalador
+""" # Guardar el escalador
 scaler_filename = "scaler.save"
-joblib.dump(scaler, scaler_filename)
+joblib.dump(scaler, scaler_filename) """
 
 # Graficar los errores en función de las épocas
 plt.plot(history.history['loss'], label='Entrenamiento')
@@ -136,8 +164,8 @@ plt.show()
 y_pred = model.predict(X_test_tensor)
 
 # Desnormalizar las predicciones y los datos de prueba. Limitar a valores entre 0 y 100
-y_pred = scaler.inverse_transform(y_pred)
-y_test = scaler.inverse_transform(y_test_tensor)
+y_pred = y_pred * 100
+y_test = y_test_tensor * 100
 
 # Crear un DataFrame con los datos predichos y los datos de prueba
 df_pred = pd.DataFrame({'Esperado_1': y_test[:, 0], 'Predicho_1': y_pred[:, 0],
